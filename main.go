@@ -94,6 +94,7 @@ func main() {
 	log.Println("webapp")
 	r := mux.NewRouter()
 	r.HandleFunc("/", HomeHandler)
+	r.HandleFunc("/products/{id:[0-9]+}", ProductHandler)
 	r.HandleFunc("/initialize", InitializeHandler)
 	r.Use(loggingMiddleware)
 	http.Handle("/", r)
@@ -119,13 +120,16 @@ func CutText(text string, length int) string {
 	return text
 }
 
+func getCurrentUser(r *http.Request) *User {
+	return &User{}
+}
+
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
-	currentUser := User{}
+	currentUser := getCurrentUser(r)
 	p := 0
 	if page, ok := r.URL.Query()["page"]; ok {
 		p, _ = strconv.Atoi(page[0])
 	}
-	layout := "templates/layout.tmpl"
 	viewProducts := []*Product{}
 	for i := 0; i < 50; i++ {
 		id := 10000 - p*50 - i
@@ -136,10 +140,30 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 		"CurrentUser": currentUser,
 		"Products":    viewProducts,
 	}
-	t := template.Must(template.ParseFiles(layout, "templates/index.tmpl"))
+	t := template.Must(template.ParseFiles("templates/layout.tmpl", "templates/index.tmpl"))
 	if err := t.Execute(w, data); err != nil {
 		log.Println(err)
 	}
+}
+
+func ProductHandler(w http.ResponseWriter, r *http.Request) {
+	currentUser := getCurrentUser(r)
+	vars := mux.Vars(r)
+	productID, _ := strconv.Atoi(vars["id"])
+	product := productMap[productID]
+	comments := product.Comments
+	bought := false
+	data := map[string]interface{}{
+		"CurrentUser":   currentUser,
+		"Product":       product,
+		"Comments":      comments,
+		"AlreadyBought": bought,
+	}
+	t := template.Must(template.ParseFiles("templates/layout.tmpl", "templates/product.tmpl"))
+	if err := t.Execute(w, data); err != nil {
+		log.Println(err)
+	}
+
 }
 
 func LoadDataCache() {
