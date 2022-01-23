@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -32,6 +33,7 @@ type Comment struct {
 	Content   string    `db:"content" json:"content"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	Content25 string
+	Product   *Product
 	User      *User
 }
 
@@ -40,6 +42,8 @@ type History struct {
 	ProductId int       `db:"product_id" json:"product_id"`
 	UserId    int       `db:"user_id" json:"user_id"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	Product   *Product
+	User      *User
 }
 
 type Product struct {
@@ -71,6 +75,9 @@ func Getenv(key string, defaultValue string) string {
 	}
 }
 
+var store = sessions.NewCookieStore([]byte(Getenv("SESSION_KEY", "-")))
+var sessionName = "session-name"
+
 var db *sqlx.DB
 
 func init() {
@@ -95,6 +102,10 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/", HomeHandler)
 	r.HandleFunc("/products/{id:[0-9]+}", ProductHandler)
+	r.HandleFunc("/users/{id:[0-9]+}", UserHandler)
+	r.HandleFunc("/login", LoginHandler).Methods("GET")
+	r.HandleFunc("/login", LoginPostHandler).Methods("POST")
+	r.HandleFunc("/products/buy/{id:[0-9]+}", ProductBuyHandler).Methods("POST")
 	r.HandleFunc("/initialize", InitializeHandler)
 	r.Use(loggingMiddleware)
 	http.Handle("/", r)
@@ -103,14 +114,15 @@ func main() {
 }
 
 var (
-	users      []User
-	comments   []Comment
-	histories  []History
-	products   []Product
-	userMap    map[int]*User
-	commentMap map[int]*Comment
-	historyMap map[int]*History
-	productMap map[int]*Product
+	users          []User
+	comments       []Comment
+	histories      []History
+	products       []Product
+	userMap        map[int]*User
+	commentMap     map[int]*Comment
+	historyMap     map[int]*History
+	productMap     map[int]*Product
+	userMapByEmail map[string]*User
 )
 
 func CutText(text string, length int) string {
@@ -120,8 +132,17 @@ func CutText(text string, length int) string {
 	return text
 }
 
-func getCurrentUser(r *http.Request) *User {
-	return &User{}
+func getCurrentUser(r *http.Request) (user *User) {
+	user = &User{}
+	session, _ := store.Get(r, sessionName)
+	email := session.Values["email"]
+	if email != nil {
+		u := userMapByEmail[email.(string)]
+		if u != nil {
+			user = u
+		}
+	}
+	return
 }
 
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +187,97 @@ func ProductHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func UserHandler(w http.ResponseWriter, r *http.Request) {
+	currentUser := getCurrentUser(r)
+	vars := mux.Vars(r)
+	userID, _ := strconv.Atoi(vars["id"])
+	user := userMap[userID]
+	totalPay := 0
+	histories := []*History{}
+	for i := range user.Histories {
+		history := user.Histories[len(user.Histories)-i-1]
+		histories = append(histories, history)
+		totalPay += history.Product.Price
+	}
+	data := map[string]interface{}{
+		"CurrentUser": currentUser,
+		"User":        user,
+		"Histories":   histories,
+		"TotalPay":    totalPay,
+	}
+
+	t := template.Must(template.New("layout.tmpl").Funcs(template.FuncMap{
+		"jst": func(t time.Time) string {
+			return t.Local().Format("2006-01-02 03:04:05")
+		},
+	}).ParseFiles("templates/layout.tmpl", "templates/mypage.tmpl"))
+
+	if err := t.Execute(w, data); err != nil {
+		log.Println(err)
+	}
+
+}
+
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"Message": "ECサイトで爆買いしよう！！！！",
+	}
+	t := template.Must(template.ParseFiles("templates/login.tmpl"))
+	if err := t.Execute(w, data); err != nil {
+		log.Println(err)
+	}
+}
+
+func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	email := r.PostForm.Get("email")
+	password := r.PostForm.Get("password")
+	log.Println("Auth", email, password)
+
+	session, _ := store.Get(r, sessionName)
+	u := userMapByEmail[email]
+	if u != nil && u.Password == password {
+		session.Values["email"] = email
+		session.Save(r, w)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	} else {
+		data := map[string]interface{}{
+			"Message": "ログインに失敗しました",
+		}
+		t := template.Must(template.ParseFiles("templates/login.tmpl"))
+		if err := t.Execute(w, data); err != nil {
+			log.Println(err)
+		}
+	}
+}
+
+func ProductBuyHandler(w http.ResponseWriter, r *http.Request) {
+	currentUser := getCurrentUser(r)
+	vars := mux.Vars(r)
+	productID, _ := strconv.Atoi(vars["id"])
+	log.Printf("Buy %d by %s(%d)", productID, currentUser.Email, currentUser.ID)
+	/*
+			// need authenticated
+		if notAuthenticated(sessions.Default(c)) {
+			tmpl, _ := template.ParseFiles("templates/login.tmpl")
+			r.SetHTMLTemplate(tmpl)
+			c.HTML(http.StatusForbidden, "login", gin.H{
+				"Message": "先にログインをしてください",
+			})
+		} else {
+			// buy product
+			cUser := currentUser(sessions.Default(c))
+			cUser.BuyProduct(c.Param("productId"))
+
+			// redirect to user page
+			tmpl, _ := template.ParseFiles("templates/mypage.tmpl")
+			r.SetHTMLTemplate(tmpl)
+			c.Redirect(http.StatusFound, "/users/"+strconv.Itoa(cUser.ID))
+		}
+
+	*/
+}
+
 func LoadDataCache() {
 	log.Println("Load data cache")
 
@@ -191,31 +303,34 @@ func LoadDataCache() {
 	}
 
 	userMap = make(map[int]*User)
+	userMapByEmail = make(map[string]*User)
 	for i := range users {
 		v := &users[i]
 		userId := v.ID
+		v.Comments = make([]*Comment, 0)
+		v.Histories = make([]*History, 0)
 		userMap[userId] = v
-		userMap[userId].Comments = make([]*Comment, 0)
-		userMap[userId].Histories = make([]*History, 0)
+		userMapByEmail[v.Email] = v
 	}
 
 	productMap = make(map[int]*Product)
 	for i := range products {
 		v := &products[i]
 		productID := v.ID
+		v.Comments = make([]*Comment, 0)
+		v.Histories = make([]*History, 0)
+		v.Descr70 = CutText(v.Description, 70)
 		productMap[productID] = v
-		productMap[productID].Comments = make([]*Comment, 0)
-		productMap[productID].Histories = make([]*History, 0)
-		productMap[productID].Descr70 = CutText(productMap[productID].Description, 70)
 	}
 
 	commentMap = make(map[int]*Comment)
 	for i := range comments {
 		v := &comments[i]
 		commentMap[i] = v
-		commentMap[i].Content25 = CutText(commentMap[i].Content, 25)
+		v.Content25 = CutText(v.Content, 25)
 		userMap[v.UserId].Comments = append(userMap[v.UserId].Comments, v)
 		productMap[v.ProductId].Comments = append(productMap[v.ProductId].Comments, v)
+		v.Product = productMap[v.ProductId]
 		v.User = userMap[v.UserId]
 	}
 
@@ -225,6 +340,8 @@ func LoadDataCache() {
 		historyMap[i] = v
 		userMap[v.UserId].Histories = append(userMap[v.UserId].Histories, v)
 		productMap[v.ProductId].Histories = append(productMap[v.ProductId].Histories, v)
+		v.Product = productMap[v.ProductId]
+		v.User = userMap[v.UserId]
 	}
 
 	for i := range products {

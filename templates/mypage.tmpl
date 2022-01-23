@@ -8,7 +8,8 @@
 <div class="container">
   <div class="row">
     {{ $owner := eq .User.ID .CurrentUser.ID }}
-    {{ range $index, $product := .Products }}
+    {{ range $index, $history := .Histories }}
+    {{ $product := $history.Product }}
       {{ if ge $index 30 }}{{ else }}
       <div class="col-md-4">
         <div class="panel panel-default">
@@ -20,9 +21,9 @@
             <h4>価格</h4>
             <p>{{ $product.Price }}円</p>
             <h4>商品説明</h4>
-            <p>{{ $product.Description }}</p>
+            <p>{{ $product.Descr70 }}</p>
             <h4>購入日時</h4>
-            <p>{{ $product.CreatedAt }}</p>
+            <p>{{ jst $history.CreatedAt }}</p>
           </div>
           {{ if $owner }}
             <div class="panel-footer">
