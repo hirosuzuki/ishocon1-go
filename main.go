@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -112,17 +113,28 @@ var (
 )
 
 func CutText(text string, length int) string {
-	if utf8.RuneCountInString(text) > 70 {
-		return string([]rune(text)[:70]) + "…"
+	if utf8.RuneCountInString(text) > length {
+		return string([]rune(text)[:length]) + "…"
 	}
 	return text
 }
 
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
+	currentUser := User{}
+	p := 0
+	if page, ok := r.URL.Query()["page"]; ok {
+		p, _ = strconv.Atoi(page[0])
+	}
 	layout := "templates/layout.tmpl"
+	viewProducts := []*Product{}
+	for i := 0; i < 50; i++ {
+		id := 10000 - p*50 - i
+		v := productMap[id]
+		viewProducts = append(viewProducts, v)
+	}
 	data := map[string]interface{}{
-		"CurrentUser": userMap[1],
-		"Products":    products[9980:10000],
+		"CurrentUser": currentUser,
+		"Products":    viewProducts,
 	}
 	t := template.Must(template.ParseFiles(layout, "templates/index.tmpl"))
 	if err := t.Execute(w, data); err != nil {
