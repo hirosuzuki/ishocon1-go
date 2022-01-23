@@ -18,11 +18,11 @@
             <h4>価格</h4>
             <p>{{ $product.Price }}円</p>
             <h4>商品説明</h4>
-            <p>{{ $product.Description }}</p>
-            <h4>{{ $product.CommentCount }}件のレビュー</h4>
+            <p>{{ $product.Descr70}}</p>
+            <h4>{{ len $product.Comments }}件のレビュー</h4>
             <ul>
-              {{ range $cw := $product.Comments }}
-                <li>{{ $cw.Content }} by {{ $cw.Writer }}</li>
+              {{ range $cw := $product.Comments5 }}
+                <li>{{ $cw.Content25 }} by {{ $cw.User.Name }}</li>
               {{ end }}
             </ul>
           </div>

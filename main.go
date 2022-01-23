@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
@@ -29,6 +30,8 @@ type Comment struct {
 	UserId    int       `db:"user_id" json:"user_id"`
 	Content   string    `db:"content" json:"content"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	Content25 string
+	User      *User
 }
 
 type History struct {
@@ -47,6 +50,8 @@ type Product struct {
 	CreatedAt   time.Time `db:"created_at" json:"created_at"`
 	Comments    []*Comment
 	Histories   []*History
+	Descr70     string
+	Comments5   []*Comment
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -106,18 +111,23 @@ var (
 	productMap map[int]*Product
 )
 
+func CutText(text string, length int) string {
+	if utf8.RuneCountInString(text) > 70 {
+		return string([]rune(text)[:70]) + "…"
+	}
+	return text
+}
+
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
 	layout := "templates/layout.tmpl"
 	data := map[string]interface{}{
 		"CurrentUser": userMap[1],
-		"Products":    "interface{}",
+		"Products":    products[9980:10000],
 	}
 	t := template.Must(template.ParseFiles(layout, "templates/index.tmpl"))
 	if err := t.Execute(w, data); err != nil {
 		log.Println(err)
 	}
-	w.WriteHeader(200)
-	log.Println("////", t)
 }
 
 func LoadDataCache() {
@@ -145,33 +155,49 @@ func LoadDataCache() {
 	}
 
 	userMap = make(map[int]*User)
-	for _, v := range users {
+	for i := range users {
+		v := &users[i]
 		userId := v.ID
-		userMap[userId] = &v
+		userMap[userId] = v
 		userMap[userId].Comments = make([]*Comment, 0)
 		userMap[userId].Histories = make([]*History, 0)
 	}
 
 	productMap = make(map[int]*Product)
-	for _, v := range products {
+	for i := range products {
+		v := &products[i]
 		productID := v.ID
-		productMap[productID] = &v
+		productMap[productID] = v
 		productMap[productID].Comments = make([]*Comment, 0)
 		productMap[productID].Histories = make([]*History, 0)
+		productMap[productID].Descr70 = CutText(productMap[productID].Description, 70)
 	}
 
 	commentMap = make(map[int]*Comment)
-	for i, v := range comments {
-		commentMap[i] = &v
-		userMap[v.UserId].Comments = append(userMap[v.UserId].Comments, &v)
-		productMap[v.ProductId].Comments = append(productMap[v.ProductId].Comments, &v)
+	for i := range comments {
+		v := &comments[i]
+		commentMap[i] = v
+		commentMap[i].Content25 = CutText(commentMap[i].Content, 25)
+		userMap[v.UserId].Comments = append(userMap[v.UserId].Comments, v)
+		productMap[v.ProductId].Comments = append(productMap[v.ProductId].Comments, v)
+		v.User = userMap[v.UserId]
 	}
 
 	historyMap = make(map[int]*History)
-	for i, v := range histories {
-		historyMap[i] = &v
-		userMap[v.UserId].Histories = append(userMap[v.UserId].Histories, &v)
-		productMap[v.ProductId].Histories = append(productMap[v.ProductId].Histories, &v)
+	for i := range histories {
+		v := &histories[i]
+		historyMap[i] = v
+		userMap[v.UserId].Histories = append(userMap[v.UserId].Histories, v)
+		productMap[v.ProductId].Histories = append(productMap[v.ProductId].Histories, v)
+	}
+
+	for i := range products {
+		v := &products[i]
+		comments5 := []*Comment{}
+		for j := 0; j < 5; j++ {
+			comments5 = append(comments5, v.Comments[len(v.Comments)-j-1])
+		}
+		v.Comments5 = comments5
 	}
 
 	log.Printf("Loaded data cache: users=%d commetns=%d histories=%d products=%d\n", len(users), len(comments), len(histories), len(products))
