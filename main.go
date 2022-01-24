@@ -105,7 +105,9 @@ func main() {
 	r.HandleFunc("/users/{id:[0-9]+}", UserHandler)
 	r.HandleFunc("/login", LoginHandler).Methods("GET")
 	r.HandleFunc("/login", LoginPostHandler).Methods("POST")
+	r.HandleFunc("/logout", LogoutHandler)
 	r.HandleFunc("/products/buy/{id:[0-9]+}", ProductBuyHandler).Methods("POST")
+	r.HandleFunc("/comments/{id:[0-9]+}", CommentHandler).Methods("POST")
 	r.HandleFunc("/initialize", InitializeHandler)
 	r.Use(loggingMiddleware)
 	http.Handle("/", r)
@@ -218,14 +220,25 @@ func UserHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func LoginHandler(w http.ResponseWriter, r *http.Request) {
+func showLoginPage(w http.ResponseWriter, r *http.Request, message string) {
 	data := map[string]interface{}{
-		"Message": "ECサイトで爆買いしよう！！！！",
+		"Message": message,
 	}
 	t := template.Must(template.ParseFiles("templates/login.tmpl"))
 	if err := t.Execute(w, data); err != nil {
 		log.Println(err)
 	}
+}
+
+func LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, sessionName)
+	session.Values["email"] = nil
+	session.Save(r, w)
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	showLoginPage(w, r, "ECサイトで爆買いしよう！！！！")
 }
 
 func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -241,41 +254,65 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		session.Save(r, w)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	} else {
-		data := map[string]interface{}{
-			"Message": "ログインに失敗しました",
-		}
-		t := template.Must(template.ParseFiles("templates/login.tmpl"))
-		if err := t.Execute(w, data); err != nil {
-			log.Println(err)
-		}
+		showLoginPage(w, r, "ログインに失敗しました")
 	}
 }
 
 func ProductBuyHandler(w http.ResponseWriter, r *http.Request) {
 	currentUser := getCurrentUser(r)
+	if currentUser.ID == 0 {
+		showLoginPage(w, r, "先にログインをしてください")
+		return
+	}
 	vars := mux.Vars(r)
 	productID, _ := strconv.Atoi(vars["id"])
 	log.Printf("Buy %d by %s(%d)", productID, currentUser.Email, currentUser.ID)
-	/*
-			// need authenticated
-		if notAuthenticated(sessions.Default(c)) {
-			tmpl, _ := template.ParseFiles("templates/login.tmpl")
-			r.SetHTMLTemplate(tmpl)
-			c.HTML(http.StatusForbidden, "login", gin.H{
-				"Message": "先にログインをしてください",
-			})
-		} else {
-			// buy product
-			cUser := currentUser(sessions.Default(c))
-			cUser.BuyProduct(c.Param("productId"))
+	// TODO:同期
+	// TODO:DB更新
+	user := currentUser
+	newHistoryID := histories[len(histories)-1].ID + 1
+	product := productMap[productID]
+	history := History{ID: newHistoryID, ProductId: productID, UserId: currentUser.ID, Product: product, User: user, CreatedAt: time.Now()}
+	histories = append(histories, history)
+	historyMap[newHistoryID] = &history
+	product.Histories = append(product.Histories, &history)
+	user.Histories = append(user.Histories, &history)
+	http.Redirect(w, r, "/users/"+strconv.Itoa(currentUser.ID), http.StatusFound)
+	log.Printf("Buy success %d by %s(%d)", productID, currentUser.Email, currentUser.ID)
+}
 
-			// redirect to user page
-			tmpl, _ := template.ParseFiles("templates/mypage.tmpl")
-			r.SetHTMLTemplate(tmpl)
-			c.Redirect(http.StatusFound, "/users/"+strconv.Itoa(cUser.ID))
-		}
+func getLast5Comments(product *Product) []*Comment {
+	comments5 := []*Comment{}
+	for j := 0; j < 5; j++ {
+		comments5 = append(comments5, product.Comments[len(product.Comments)-j-1])
+	}
+	return comments5
+}
 
-	*/
+func CommentHandler(w http.ResponseWriter, r *http.Request) {
+	currentUser := getCurrentUser(r)
+	if currentUser.ID == 0 {
+		showLoginPage(w, r, "先にログインをしてください")
+		return
+	}
+	vars := mux.Vars(r)
+	productID, _ := strconv.Atoi(vars["id"])
+	r.ParseForm()
+	content := r.PostForm.Get("content")
+	log.Printf("Post comment %d by %s(%d)", productID, currentUser.Email, currentUser.ID)
+	// TODO:同期
+	// TODO:DB更新
+	user := currentUser
+	newCommentID := comments[len(comments)-1].ID + 1
+	product := productMap[productID]
+	comment := Comment{ID: newCommentID, ProductId: productID, UserId: currentUser.ID, Product: product, User: user, CreatedAt: time.Now(), Content: content, Content25: CutText(content, 25)}
+	comments = append(comments, comment)
+	commentMap[newCommentID] = &comment
+	product.Comments = append(product.Comments, &comment)
+	product.Comments5 = getLast5Comments(product)
+	user.Comments = append(user.Comments, &comment)
+	http.Redirect(w, r, "/users/"+strconv.Itoa(currentUser.ID), http.StatusFound)
+	log.Printf("Post comment success %d by %s(%d)", productID, currentUser.Email, currentUser.ID)
 }
 
 func LoadDataCache() {
@@ -346,11 +383,7 @@ func LoadDataCache() {
 
 	for i := range products {
 		v := &products[i]
-		comments5 := []*Comment{}
-		for j := 0; j < 5; j++ {
-			comments5 = append(comments5, v.Comments[len(v.Comments)-j-1])
-		}
-		v.Comments5 = comments5
+		v.Comments5 = getLast5Comments(v)
 	}
 
 	log.Printf("Loaded data cache: users=%d commetns=%d histories=%d products=%d\n", len(users), len(comments), len(histories), len(products))
